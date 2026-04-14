@@ -12,6 +12,7 @@ import {
     ResponsiveContainer,
 } from 'recharts';
 import ExcelExportButton from '../components/ExcelExportButton';
+import DatePicker from '../components/DatePicker';
 
 type DailyPoint = {
     day: string;      // YYYY-MM-DD
@@ -186,21 +187,21 @@ export default function VitesseClient() {
                     <div className="flex gap-3 items-end flex-wrap">
                         <label className="text-slate-400 text-xs font-semibold uppercase tracking-wide">
                             Début
-                            <input
-                                type="date"
+                            <DatePicker
                                 value={from}
-                                onChange={(e) => setFrom(e.target.value)}
-                                className="mt-1 w-full bg-slate-800/50 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs focus:outline-none focus:border-indigo-500 dark:[color-scheme:dark]"
+                                onChange={(v) => setFrom(v)}
+                                wrapperClassName="mt-1"
+                                className="w-full bg-slate-800/50 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs focus:outline-none focus:border-indigo-500 dark:[color-scheme:dark]"
                             />
                         </label>
 
                         <label className="text-slate-400 text-xs font-semibold uppercase tracking-wide">
                             Fin
-                            <input
-                                type="date"
+                            <DatePicker
                                 value={to}
-                                onChange={(e) => setTo(e.target.value)}
-                                className="mt-1 w-full bg-slate-800/50 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs focus:outline-none focus:border-indigo-500 dark:[color-scheme:dark]"
+                                onChange={(v) => setTo(v)}
+                                wrapperClassName="mt-1"
+                                className="w-full bg-slate-800/50 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs focus:outline-none focus:border-indigo-500 dark:[color-scheme:dark]"
                             />
                         </label>
 
