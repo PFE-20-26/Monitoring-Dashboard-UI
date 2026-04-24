@@ -12,11 +12,9 @@ type Cause = {
     isActive: boolean;
 };
 
-type PagedResponse = {
+type ListResponse = {
     items: Cause[];
     total: number;
-    page: number;
-    limit: number;
 };
 
 // --- API Helper ---
@@ -87,7 +85,7 @@ const Icons = {
 
 // --- Main Component ---
 export default function CausesClient() {
-    const [data, setData] = useState<PagedResponse | null>(null);
+    const [data, setData] = useState<ListResponse | null>(null);
     const [loading, setLoading] = useState(false);
     const [err, setErr] = useState<string | null>(null);
 
@@ -107,7 +105,6 @@ export default function CausesClient() {
         const params = new URLSearchParams();
         if (search.trim()) params.set('search', search.trim());
         if (!includeInactive) params.set('isActive', 'true');
-        params.set('limit', '1000');
         return params.toString();
     }, [search, includeInactive]);
 
@@ -115,7 +112,7 @@ export default function CausesClient() {
         setLoading(true);
         setErr(null);
         try {
-            const res = await apiFetch<PagedResponse>(`/api/causes?${queryString}`);
+            const res = await apiFetch<ListResponse>(`/api/causes?${queryString}`);
             setData(res);
         } catch (e: any) {
             setErr(e?.message ?? 'Erreur lors du chargement des causes');

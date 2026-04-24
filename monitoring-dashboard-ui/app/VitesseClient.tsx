@@ -29,19 +29,7 @@ type Summary = {
     samples: number;
 };
 
-type VitesseEntry = {
-    id: string;
-    recordedAt: string;
-    speed: number;
-    note: string | null;
-};
 
-type PagedResponse = {
-    items: VitesseEntry[];
-    total: number;
-    page: number;
-    limit: number;
-};
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
@@ -95,13 +83,8 @@ export default function VitesseClient() {
 
     const [daily, setDaily] = useState<DailyPoint[]>([]);
     const [summary, setSummary] = useState<Summary | null>(null);
-    const [list, setList] = useState<PagedResponse | null>(null);
-
     const [loading, setLoading] = useState(false);
     const [err, setErr] = useState<string | null>(null);
-
-    const [page, setPage] = useState(1);
-    const LIMIT = 5;
 
     const queryString = useMemo(() => {
         const params = new URLSearchParams();
@@ -114,14 +97,12 @@ export default function VitesseClient() {
         setLoading(true);
         setErr(null);
         try {
-            const [dailyRes, summaryRes, listRes] = await Promise.all([
+            const [dailyRes, summaryRes] = await Promise.all([
                 apiFetch<DailyPoint[]>(`/api/vitesse/daily?${queryString}`),
                 apiFetch<Summary>(`/api/vitesse/summary?${queryString}`),
-                apiFetch<PagedResponse>(`/api/vitesse?${queryString}&page=${page}&limit=${LIMIT}`),
             ]);
             setDaily(dailyRes);
             setSummary(summaryRes);
-            setList(listRes);
         } catch (e: any) {
             setErr(e?.message ?? 'Erreur lors du chargement des vitesses');
         } finally {
@@ -132,11 +113,6 @@ export default function VitesseClient() {
     useEffect(() => {
         load();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [queryString, page]); // Reload when query or page changes
-
-    // Reset page when filters change
-    useEffect(() => {
-        setPage(1);
     }, [queryString]);
 
     async function onCreate(e: React.FormEvent) {
@@ -331,79 +307,7 @@ export default function VitesseClient() {
                 </form>
             </div>
 
-            {/* List */}
-            <div className="bg-slate-900/80 backdrop-blur-xl border border-slate-700/50 rounded-2xl overflow-hidden shadow-2xl">
-                <div className="flex justify-between items-center p-5 border-b border-slate-700/50">
-                    <h2 className="text-lg font-bold text-white">Derniers échantillons</h2>
-                    <div className="text-slate-500 font-medium whitespace-nowrap px-2 text-xs uppercase tracking-wide">
-                        Total: <span className="text-slate-200">{list?.total ?? 0}</span>
-                    </div>
-                </div>
 
-                <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
-                        <thead>
-                            <tr className="text-[11px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-700/50 bg-slate-800/30">
-                                <th className="px-6 py-4">Enregistré le</th>
-                                <th className="px-6 py-4">Vitesse</th>
-                                <th className="px-6 py-4">Note</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-700/50 text-xs">
-                            {!loading && list?.items.length === 0 && (
-                                <tr>
-                                    <td colSpan={3} className="px-6 py-8 text-center text-slate-500">
-                                        Aucune donnée trouvée.
-                                    </td>
-                                </tr>
-                            )}
-
-                            {list?.items.map((v) => (
-                                <tr key={v.id} className="group hover:bg-slate-800/40 transition-colors">
-                                    <td className="px-6 py-4 font-mono text-slate-300 group-hover:text-white transition-colors">
-                                        {formatDateTime(v.recordedAt)}
-                                    </td>
-                                    <td className="px-6 py-4 text-indigo-200 font-semibold">
-                                        {Number(v.speed).toFixed(3)}
-                                    </td>
-                                    <td className="px-6 py-4 text-slate-400">
-                                        {v.note ?? ''}
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-
-                {!loading && list && (
-                    <div className="px-6 py-4 border-t border-slate-700/50 flex justify-between items-center bg-slate-800/20">
-                        <div className="text-[10px] text-slate-500 uppercase tracking-wide">
-                            Affichage de {list.items.length} sur {list.total} entrées
-                        </div>
-                        {list.total > LIMIT && (
-                            <div className="flex gap-2">
-                                <button
-                                    onClick={() => setPage(p => Math.max(1, p - 1))}
-                                    disabled={page === 1}
-                                    className="px-3 py-1 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 rounded border border-slate-700 text-xs"
-                                >
-                                    Précédent
-                                </button>
-                                <span className="text-xs text-slate-500 py-1">
-                                    Page {page} / {Math.ceil(list.total / LIMIT)}
-                                </span>
-                                <button
-                                    onClick={() => setPage(p => Math.min(Math.ceil(list.total / LIMIT), p + 1))}
-                                    disabled={page >= Math.ceil(list.total / LIMIT)}
-                                    className="px-3 py-1 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 rounded border border-slate-700 text-xs"
-                                >
-                                    Suivant
-                                </button>
-                            </div>
-                        )}
-                    </div>
-                )}
-            </div>
         </div>
     );
 }

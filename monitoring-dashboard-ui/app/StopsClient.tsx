@@ -378,7 +378,8 @@ export default function StopsClient() {
                                     const refSeconds = 8 * 3600;
                                     const avail = calculateAvailableTime(row.day, equipe);
                                     const downTRS = Number(row.trsDowntimeSeconds || 0);
-                                    const trsValue = avail > 0 ? ((avail - downTRS) / refSeconds) * 100 : 0;
+                                    const rawTrsValue = avail > 0 ? ((avail - downTRS) / refSeconds) * 100 : 0;
+                                    const trsValue = Math.max(0, rawTrsValue);
                                     const trsColor = trsValue >= 85 ? 'text-emerald-400' : trsValue >= 50 ? 'text-amber-400' : 'text-red-400';
 
                                     return (
@@ -451,7 +452,8 @@ export default function StopsClient() {
                                 <table className="w-full text-left border-collapse">
                                     <thead>
                                         <tr className="text-[11px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-700/50 bg-slate-800/40">
-                                            <th className="px-4 py-3">Heure</th>
+                                            <th className="px-4 py-3">Début</th>
+                                            <th className="px-4 py-3">Fin</th>
                                             <th className="px-4 py-3">Durée</th>
                                             <th className="px-4 py-3">Cause</th>
                                             <th className="px-4 py-3 text-right">Impact TRS</th>
@@ -461,14 +463,17 @@ export default function StopsClient() {
                                     <tbody className="divide-y divide-slate-700/30 text-xs">
                                         {/* First load — no data yet */}
                                         {loadingStops && !stopsData && (
-                                            <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500">Chargement...</td></tr>
+                                            <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500">Chargement...</td></tr>
                                         )}
                                         {!loadingStops && stopsData?.items.length === 0 && (
-                                            <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500">Aucun arrêt trouvé.</td></tr>
+                                            <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500">Aucun arrêt trouvé.</td></tr>
                                         )}
                                         {stopsData?.items.map(stop => (
                                             <tr key={stop.id} className="group hover:bg-slate-800/40 transition-colors">
                                                 <td className="px-4 py-2 text-slate-300 font-mono whitespace-nowrap">{formatTime(stop.startTime)}</td>
+                                                <td className="px-4 py-2 text-slate-300 font-mono whitespace-nowrap">
+                                                    {stop.stopTime ? formatTime(stop.stopTime) : <span className="text-slate-500">—</span>}
+                                                </td>
                                                 <td className="px-4 py-2">
                                                     {stop.durationSeconds !== null ? (
                                                         <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-slate-800 text-indigo-300 border border-slate-700/50">
