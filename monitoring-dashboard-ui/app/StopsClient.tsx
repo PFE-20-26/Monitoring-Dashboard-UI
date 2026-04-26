@@ -147,8 +147,11 @@ export default function StopsClient() {
 
     const [causes, setCauses] = useState<CauseOption[]>([]);
 
-    const [fromDate, setFromDate] = useState('');
-    const [toDate, setToDate] = useState('');
+    const [fromDate, setFromDate] = useState(() => {
+        const d = new Date(); d.setDate(d.getDate() - 30);
+        return d.toISOString().split('T')[0];
+    });
+    const [toDate, setToDate] = useState(() => new Date().toISOString().split('T')[0]);
     const [equipe, setEquipe] = useState<'1' | '2' | '3'>('1');
 
     const [dailyPage, setDailyPage] = useState(1);
@@ -352,7 +355,20 @@ export default function StopsClient() {
                             <h2 className="text-lg font-bold text-white">Résumé Arrêts</h2>
                             <p className="text-xs text-slate-400 mt-1">Sélectionnez un jour pour voir les détails</p>
                         </div>
-                        <ExcelExportButton data={dailyRows} fileName="resume_arrets_jour" sheetName="Resume" label="Exporter excel" />
+                        <ExcelExportButton 
+                            data={dailyRows} 
+                            fileName="resume_arrets_jour" 
+                            sheetName="Résumé" 
+                            label="Exporter excel"
+                            columnOrder={['day', 'stopsCount', 'totalDowntimeSeconds', 'trsDowntimeSeconds', 'totalWorkSeconds']}
+                            headers={{
+                                day: 'Jour',
+                                stopsCount: 'Nombre d\'arrêts',
+                                totalDowntimeSeconds: 'Temps d\'arrêt (s)',
+                                trsDowntimeSeconds: 'Arrêt TRS (s)',
+                                totalWorkSeconds: 'Temps de travail (s)',
+                            }}
+                        />
                     </div>
 
                     <div className="overflow-x-auto flex-1">
@@ -437,7 +453,37 @@ export default function StopsClient() {
                                         className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700/50 transition-colors" title="Actualiser">
                                         <Icons.Refresh />
                                     </button>
-                                    <ExcelExportButton data={stopsData?.items || []} fileName={`arrets_${selectedDay}`} sheetName="Details" label="Exporter excel" />
+                                    <ExcelExportButton 
+                                        fetchAllData={async () => {
+                                            const p = new URLSearchParams({
+                                                page: '1',
+                                                limit: '100000',
+                                                from: selectedDay,
+                                                to: selectedDay,
+                                                equipe: String(equipe),
+                                            });
+                                            const res = await apiFetch<PagedResponse>(`/api/stops?${p.toString()}`);
+                                            return (res.items || []).map(s => ({
+                                                ...s,
+                                                durationFormatted: s.durationSeconds !== null ? formatDuration(s.durationSeconds) : 'En cours',
+                                                affectTRS: s['impact trs'] === 1 ? 'Oui' : 'Non'
+                                            }));
+                                        }}
+                                        fileName={`arrets_${selectedDay}`} 
+                                        sheetName="Détails" 
+                                        label="Exporter tout"
+                                        columnOrder={['day', 'startTime', 'stopTime', 'durationFormatted', 'durationSeconds', 'causeName', 'affectTRS', 'equipe']}
+                                        headers={{
+                                            day: 'Jour de Production',
+                                            startTime: 'Heure Début',
+                                            stopTime: 'Heure Fin',
+                                            durationFormatted: 'Durée',
+                                            durationSeconds: 'Durée (s)',
+                                            causeName: 'Cause',
+                                            affectTRS: 'Affect TRS',
+                                            equipe: 'Équipe',
+                                        }}
+                                    />
                                 </div>
                             </div>
 
