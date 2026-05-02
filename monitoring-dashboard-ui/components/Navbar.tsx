@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 const navItems = [
+    { name: 'Vue d\'ensemble', href: '/dashboard' },
     { name: 'Arrêts & Analytique', href: '/stops' },
     { name: 'Causes d\'Arrêt', href: '/causes' },
     { name: 'Métrage', href: '/metrage' },
@@ -17,7 +18,7 @@ export default function Navbar() {
         <div className="flex justify-center mb-6">
             <div className="bg-slate-800/50 p-1 rounded-full flex gap-1 transition-all duration-500 backdrop-blur-md border border-slate-700/50 shadow-xl">
                 {navItems.map((item) => {
-                    const isActive = pathname === item.href || (pathname === '/' && item.href === '/stops');
+                    const isActive = pathname === item.href || (pathname === '/' && item.href === '/dashboard');
                     return (
                         <Link
                             key={item.href}
