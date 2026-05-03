@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, useRef } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
     BarChart,
     Bar,
@@ -82,7 +82,8 @@ function formatDayFR(day: string) {
     return `${d}/${m}/${y}`;
 }
 
-function getColorForCause(causeName: string): string {
+function getColorForCause(causeName?: string): string {
+    if (!causeName) return '#94a3b8';
     const n = causeName.toLowerCase().trim();
     if (n.includes('panne')) return '#ef4444';
     if (n.includes('pause')) return '#10b981';
@@ -173,6 +174,7 @@ const Icons = {
 export default function DashboardClient() {
     const today = new Date().toISOString().split('T')[0];
 
+    const [filterMode, setFilterMode] = useState<'single' | 'period'>('single');
     const [fromDate, setFromDate] = useState(today);
     const [toDate, setToDate] = useState(today);
     const [equipe, setEquipe] = useState<'1' | '2' | '3'>('1');
@@ -180,14 +182,12 @@ export default function DashboardClient() {
     const [dailyRows, setDailyRows] = useState<DailyStopsRow[]>([]);
     const [loadingDaily, setLoadingDaily] = useState(false);
 
-    const [selectedDay, setSelectedDay] = useState<string | null>(today);
     const [analyticsData, setAnalyticsData] = useState<AnalyticsData[]>([]);
     const [loadingAnalytics, setLoadingAnalytics] = useState(false);
 
     const [causes, setCauses] = useState<CauseOption[]>([]);
     const [err, setErr] = useState<string | null>(null);
 
-    const analyticsKeyRef = useRef<string>('');
 
     const dailyQuery = useMemo(() => {
         const p = new URLSearchParams();
@@ -204,15 +204,19 @@ export default function DashboardClient() {
             .catch(() => setCauses([]));
     }, []);
 
-    // Handle filter changes
+    // Handle filter changes + fetch analytics
     useEffect(() => {
-        if (fromDate && toDate && fromDate === toDate) {
-            setSelectedDay(fromDate);
-        } else {
-            setSelectedDay(null);
-        }
         setAnalyticsData([]);
-        analyticsKeyRef.current = '';
+        if (!fromDate || !toDate) return;
+        setLoadingAnalytics(true);
+        const p = new URLSearchParams();
+        p.set('from', fromDate);
+        p.set('to', toDate);
+        p.set('equipe', equipe);
+        apiFetch<AnalyticsData[]>(`/api/stops/analytics/downtime?${p.toString()}`)
+            .then(res => setAnalyticsData(res))
+            .catch(e => setErr(e?.message ?? 'Erreur chargement analytiques'))
+            .finally(() => setLoadingAnalytics(false));
     }, [fromDate, toDate, equipe]);
 
     async function loadDaily() {
@@ -231,50 +235,41 @@ export default function DashboardClient() {
 
     useEffect(() => { loadDaily(); }, [dailyQuery]);
 
-    async function loadAnalytics(day: string) {
-        const key = `${day}|${equipe}`;
-        if (analyticsKeyRef.current === key) return;
-        analyticsKeyRef.current = key;
-        setLoadingAnalytics(true);
-        try {
-            const p = new URLSearchParams({ from: day, to: day, equipe });
-            const res = await apiFetch<AnalyticsData[]>(`/api/stops/analytics/downtime?${p.toString()}`);
-            setAnalyticsData(res);
-        } catch (e: any) {
-            setErr(e?.message ?? 'Erreur chargement analytiques');
-            setAnalyticsData([]);
-        } finally {
-            setLoadingAnalytics(false);
-        }
-    }
-
-    useEffect(() => {
-        if (selectedDay) {
-            loadAnalytics(selectedDay);
-        }
-    }, [selectedDay, equipe]);
-
-    function onSelectDay(day: string) {
-        const d = day.split('T')[0];
-        setSelectedDay(d);
-    }
-
     // KPI aggregates over the visible period
-    const kpis = useMemo(() => {
-        if (dailyRows.length === 0) return null;
-        const totalStops = dailyRows.reduce((s, r) => s + r.stopsCount, 0);
-        const totalDowntime = dailyRows.reduce((s, r) => s + r.totalDowntimeSeconds, 0);
-        const avgTrs = (() => {
-            let trsSum = 0, count = 0;
-            for (const row of dailyRows) {
-                const avail = calculateAvailableTime(row.day, equipe);
-                const refSeconds = 8 * 3600;
-                const downTRS = Number(row.trsDowntimeSeconds || 0);
-                if (avail > 0) { trsSum += Math.max(0, ((avail - downTRS) / refSeconds) * 100); count++; }
+    const { kpis, trendData } = useMemo(() => {
+        if (dailyRows.length === 0) return { kpis: null, trendData: [] };
+        let totalStops = 0, totalDowntime = 0, trsSum = 0, count = 0;
+        
+        const data = dailyRows.map(row => {
+            totalStops += row.stopsCount;
+            totalDowntime += row.totalDowntimeSeconds;
+            
+            const avail = calculateAvailableTime(row.day, equipe);
+            const refSeconds = 8 * 3600;
+            const downTRS = Number(row.trsDowntimeSeconds || 0);
+            let trsVal = 0;
+            if (avail > 0) { 
+                trsVal = Math.max(0, ((avail - downTRS) / refSeconds) * 100);
+                trsSum += trsVal; 
+                count++; 
             }
-            return count > 0 ? trsSum / count : 0;
-        })();
-        return { totalStops, totalDowntime, avgTrs, days: dailyRows.length };
+            return {
+                dayRaw: row.day,
+                dayStr: formatDayFR(row.day),
+                stops: row.stopsCount,
+                downtimeMin: Math.round(row.totalDowntimeSeconds / 60),
+                workMin: Math.round((row.totalWorkSeconds || 0) / 60),
+                trs: Number(trsVal.toFixed(1))
+            };
+        });
+        
+        const sortedData = [...data].sort((a, b) => a.dayRaw.localeCompare(b.dayRaw));
+
+        const avgTrs = count > 0 ? trsSum / count : 0;
+        return { 
+            kpis: { totalStops, totalDowntime, avgTrs, days: dailyRows.length },
+            trendData: sortedData
+        };
     }, [dailyRows, equipe]);
 
     // Chart series for the selected day
@@ -318,20 +313,47 @@ export default function DashboardClient() {
                 <div className="flex flex-wrap items-end gap-4">
                     <div className="flex flex-col">
                         <label className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold mb-1 px-1">
-                            Période de visualisation
+                            Mode de visualisation
+                        </label>
+                        <div className="flex items-center bg-slate-800/50 p-1 rounded-xl border border-slate-700/50">
+                            <button
+                                onClick={() => { setFilterMode('single'); setToDate(fromDate); }}
+                                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${filterMode === 'single' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200'}`}
+                            >
+                                Jour unique
+                            </button>
+                            <button
+                                onClick={() => setFilterMode('period')}
+                                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${filterMode === 'period' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200'}`}
+                            >
+                                Période
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="flex flex-col">
+                        <label className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold mb-1 px-1">
+                            {filterMode === 'single' ? 'Date' : 'Période'}
                         </label>
                         <div className="flex items-center gap-2 bg-slate-800/50 p-1.5 rounded-xl border border-slate-700/50">
                             <div className="flex flex-col px-2">
-                                <span className="text-[10px] text-slate-400">Début</span>
-                                <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)}
+                                <span className="text-[10px] text-slate-400">{filterMode === 'single' ? 'Jour' : 'Début'}</span>
+                                <input type="date" value={fromDate} onChange={e => {
+                                    setFromDate(e.target.value);
+                                    if (filterMode === 'single') setToDate(e.target.value);
+                                }}
                                     className="bg-transparent text-white text-xs focus:outline-none dark:[color-scheme:dark]" />
                             </div>
-                            <div className="w-px h-8 bg-slate-700" />
-                            <div className="flex flex-col px-2">
-                                <span className="text-[10px] text-slate-400">Fin</span>
-                                <input type="date" value={toDate} onChange={e => setToDate(e.target.value)}
-                                    className="bg-transparent text-white text-xs focus:outline-none dark:[color-scheme:dark]" />
-                            </div>
+                            {filterMode === 'period' && (
+                                <>
+                                    <div className="w-px h-8 bg-slate-700" />
+                                    <div className="flex flex-col px-2">
+                                        <span className="text-[10px] text-slate-400">Fin</span>
+                                        <input type="date" value={toDate} onChange={e => setToDate(e.target.value)}
+                                            className="bg-transparent text-white text-xs focus:outline-none dark:[color-scheme:dark]" />
+                                    </div>
+                                </>
+                            )}
                         </div>
                     </div>
 
@@ -390,68 +412,16 @@ export default function DashboardClient() {
                 />
             </div>
 
-            {/* Main content: daily table + chart */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-
-                {/* Daily summary table */}
-                <div className="bg-slate-900/80 backdrop-blur-xl border border-slate-700/50 rounded-2xl overflow-hidden shadow-2xl flex flex-col">
-                    <div className="p-5 border-b border-slate-700/50 bg-slate-800/20">
-                        <h2 className="text-base font-bold text-white">Résumé Journalier</h2>
-                        <p className="text-xs text-slate-400 mt-0.5">Cliquez sur un jour pour voir le graphique</p>
-                    </div>
-
-                    <div className="overflow-x-auto flex-1">
-                        <table className="w-full text-left border-collapse">
-                            <thead>
-                                <tr className="text-[11px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-700/50 bg-slate-800/40">
-                                    <th className="px-4 py-3">Date</th>
-                                    <th className="px-4 py-3">Arrêt Total</th>
-                                    <th className="px-4 py-3">TRS</th>
-                                    <th className="px-4 py-3 text-right">Nb Arrêts</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-700/30 text-xs">
-                                {loadingDaily && dailyRows.length === 0 && (
-                                    <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-500">Chargement...</td></tr>
-                                )}
-                                {!loadingDaily && dailyRows.length === 0 && (
-                                    <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-500">Aucune donnée trouvée.</td></tr>
-                                )}
-                                {dailyRows.map(row => {
-                                    const isSelected = selectedDay === row.day;
-                                    const avail = calculateAvailableTime(row.day, equipe);
-                                    const refSeconds = 8 * 3600;
-                                    const downTRS = Number(row.trsDowntimeSeconds || 0);
-                                    const trsValue = avail > 0 ? Math.max(0, ((avail - downTRS) / refSeconds) * 100) : 0;
-
-                                    return (
-                                        <tr key={row.day} onClick={() => onSelectDay(row.day)}
-                                            className={`cursor-pointer transition-colors ${isSelected
-                                                ? 'bg-indigo-500/20 border-l-2 border-indigo-500'
-                                                : 'hover:bg-slate-800/40 border-l-2 border-transparent'}`}>
-                                            <td className="px-4 py-3 font-medium text-slate-200">{formatDayFR(row.day)}</td>
-                                            <td className="px-4 py-3 text-slate-300 font-mono">{formatHMS(row.totalDowntimeSeconds)}</td>
-                                            <td className="px-4 py-3">
-                                                <span className={`font-bold ${trsColor(trsValue)}`}>{trsValue.toFixed(1)}%</span>
-                                            </td>
-                                            <td className="px-4 py-3 text-right font-semibold text-slate-200">{row.stopsCount}</td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                {/* Analytics chart for selected day */}
+            {/* Main content: chart */}
+            <div className="mb-8">
+                {/* Analytics chart for selected period */}
                 <div className="bg-slate-900/80 backdrop-blur-xl border border-slate-700/50 rounded-2xl shadow-2xl p-6 flex flex-col min-h-[360px] relative">
-                    {!selectedDay ? (
+                    {!fromDate || !toDate ? (
                         <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500 gap-3">
                             <div className="w-14 h-14 bg-slate-800/60 rounded-full flex items-center justify-center">
                                 <Icons.Search />
                             </div>
-                            <p className="text-sm font-medium">Sélectionnez un jour</p>
-                            <p className="text-xs opacity-60">Cliquez sur une ligne du tableau pour voir le graphique</p>
+                            <p className="text-sm font-medium">Sélectionnez une période</p>
                         </div>
                     ) : (
                         <>
@@ -464,12 +434,12 @@ export default function DashboardClient() {
                                         )}
                                     </h2>
                                     <p className="text-xs text-slate-400 mt-0.5">
-                                        Répartition par cause — {formatDayFR(selectedDay)}
+                                        Répartition par cause — {filterMode === 'single' ? formatDayFR(fromDate) : `${formatDayFR(fromDate)} au ${formatDayFR(toDate)}`}
                                     </p>
                                 </div>
                             </div>
 
-                            <div className="flex-1 min-h-[260px]">
+                            <div className="h-[300px] w-full mt-2">
                                 {chartSeries.length > 0 ? (
                                     <ResponsiveContainer width="100%" height="100%">
                                         <BarChart data={chartSeries} margin={{ top: 10, right: 20, left: 0, bottom: 24 }}>
@@ -507,6 +477,86 @@ export default function DashboardClient() {
                     )}
                 </div>
             </div>
+
+            {/* Detailed Full-size Trend Charts */}
+            {trendData.length > 0 && (
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+                    {/* Graph: Nombre d'arrêts */}
+                    <div className="bg-slate-900/80 backdrop-blur-xl border border-slate-700/50 rounded-2xl shadow-2xl p-6 flex flex-col min-h-[300px]">
+                        <div className="mb-4">
+                            <h2 className="text-base font-bold text-white">Évolution: Nombre d'arrêts</h2>
+                            <p className="text-xs text-slate-400 mt-0.5">Tendance sur la période sélectionnée</p>
+                        </div>
+                        <div className="h-[250px] w-full mt-2">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={trendData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
+                                    <XAxis dataKey="dayStr" stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} />
+                                    <YAxis stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} />
+                                    <Tooltip
+                                        contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', color: '#f8fafc', fontSize: '12px' }}
+                                        itemStyle={{ color: '#818cf8' }}
+                                        cursor={{ fill: 'rgba(148, 163, 184, 0.1)' }}
+                                        labelStyle={{ color: '#cbd5e1', marginBottom: '4px' }}
+                                    />
+                                    <Bar dataKey="stops" fill="#818cf8" radius={[4, 4, 0, 0]} barSize={38} />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
+                    </div>
+
+                    {/* Graph: Temps d'arrêt */}
+                    <div className="bg-slate-900/80 backdrop-blur-xl border border-slate-700/50 rounded-2xl shadow-2xl p-6 flex flex-col min-h-[300px]">
+                        <div className="mb-4">
+                            <h2 className="text-base font-bold text-white">Évolution: Temps (Arrêt vs Travail)</h2>
+                            <p className="text-xs text-slate-400 mt-0.5">Comparaison journalière en minutes</p>
+                        </div>
+                        <div className="h-[250px] w-full mt-2">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={trendData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
+                                    <XAxis dataKey="dayStr" stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} />
+                                    <YAxis stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} />
+                                    <Tooltip
+                                        contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', color: '#f8fafc', fontSize: '12px' }}
+                                        itemStyle={{ color: '#f87171' }}
+                                        cursor={{ fill: 'rgba(148, 163, 184, 0.1)' }}
+                                        labelStyle={{ color: '#cbd5e1', marginBottom: '4px' }}
+                                        formatter={(value: any, name: any) => [`${value} min`, name === 'workMin' ? 'Temps Travail' : 'Temps Arrêt']}
+                                    />
+                                    <Bar dataKey="workMin" fill="#34d399" radius={[4, 4, 0, 0]} barSize={20} />
+                                    <Bar dataKey="downtimeMin" fill="#f87171" radius={[4, 4, 0, 0]} barSize={20} />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
+                    </div>
+
+                    {/* Graph: TRS Moyen */}
+                    <div className="bg-slate-900/80 backdrop-blur-xl border border-slate-700/50 rounded-2xl shadow-2xl p-6 flex flex-col min-h-[300px]">
+                        <div className="mb-4">
+                            <h2 className="text-base font-bold text-white">Évolution: TRS</h2>
+                            <p className="text-xs text-slate-400 mt-0.5">Taux de rendement (%)</p>
+                        </div>
+                        <div className="h-[250px] w-full mt-2">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={trendData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
+                                    <XAxis dataKey="dayStr" stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} />
+                                    <YAxis stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} domain={[0, 100]} />
+                                    <Tooltip
+                                        contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', color: '#f8fafc', fontSize: '12px' }}
+                                        itemStyle={{ color: '#3b82f6' }}
+                                        cursor={{ fill: 'rgba(148, 163, 184, 0.1)' }}
+                                        labelStyle={{ color: '#cbd5e1', marginBottom: '4px' }}
+                                        formatter={(value: any) => [`${value}%`, 'TRS']}
+                                    />
+                                    <Bar dataKey="trs" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={38} />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Placeholder section for future metrics */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

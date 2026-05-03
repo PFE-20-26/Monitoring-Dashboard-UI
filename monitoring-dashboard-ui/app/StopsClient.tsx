@@ -282,10 +282,6 @@ export default function StopsClient() {
         return merged;
     }, [causes, analyticsData]);
 
-    // Calculate total downtime for the day (used for percentage calculation)
-    const totalDayDowntimeSeconds = useMemo(() => {
-        return analyticsData.reduce((sum, a) => sum + a.totalDowntimeSeconds, 0);
-    }, [analyticsData]);
 
     const maxDuration = useMemo(() =>
         chartSeries.length ? Math.max(...chartSeries.map(d => d.totalDowntimeSeconds)) : 0,
@@ -540,9 +536,9 @@ export default function StopsClient() {
                                                         : <span className="text-slate-600">0</span>}
                                                 </td>
                                                 <td className="px-4 py-2 text-center">
-                                                    {stop.durationSeconds !== null && totalDayDowntimeSeconds > 0 ? (
+                                                    {stop['%'] !== null && stop['%'] !== undefined ? (
                                                         <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-900/40 text-indigo-300 border border-indigo-700/40">
-                                                            {((stop.durationSeconds / totalDayDowntimeSeconds) * 100).toFixed(2)}%
+                                                            {Number(stop['%']).toFixed(2)}%
                                                         </span>
                                                     ) : <span className="text-slate-600">—</span>}
                                                 </td>
