@@ -194,6 +194,19 @@ export default function VitesseClient() {
                             fileName="vitesse_journaliere_export"
                             sheetName="Vitesse"
                             label="Exporter excel"
+                            title={`Rapport Vitesse de Production | ${formatDayFR(from)} → ${formatDayFR(to)}`}
+                            columnOrder={['day', 'avgSpeed', 'maxSpeed', 'samples']}
+                            headers={{
+                                day: 'Jour',
+                                avgSpeed: 'Vitesse Moyenne',
+                                maxSpeed: 'Vitesse Max',
+                                samples: 'Nb Échantillons',
+                            }}
+                            formatters={{
+                                day: (v) => v ? v.split('T')[0].split('-').reverse().join('/') : '',
+                                avgSpeed: (v) => Number(v).toFixed(2),
+                                maxSpeed: (v) => Number(v).toFixed(2),
+                            }}
                         />
 
                         <div className="flex gap-2">

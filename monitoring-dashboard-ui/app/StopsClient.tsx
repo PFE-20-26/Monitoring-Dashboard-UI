@@ -352,17 +352,42 @@ export default function StopsClient() {
                             <p className="text-xs text-slate-400 mt-1">Sélectionnez un jour pour voir les détails</p>
                         </div>
                         <ExcelExportButton 
-                            data={dailyRows} 
+                            data={dailyRows.map(row => {
+                                const refSeconds = 8 * 3600;
+                                const avail = calculateAvailableTime(row.day, equipe);
+                                const downTRS = Number(row.trsDowntimeSeconds || 0);
+                                const trsPercent = avail > 0
+                                    ? Math.max(0, ((avail - downTRS) / refSeconds) * 100)
+                                    : 0;
+                                return { ...row, trsPercent };
+                            })}
                             fileName="resume_arrets_jour" 
                             sheetName="Résumé" 
                             label="Exporter excel"
-                            columnOrder={['day', 'stopsCount', 'totalDowntimeSeconds', 'trsDowntimeSeconds', 'totalWorkSeconds']}
+                            title={`Résumé des Arrêts — Équipe ${equipe} | ${formatDayFR(fromDate)} → ${formatDayFR(toDate)}`}
+                            columnOrder={['day', 'stopsCount', 'trsPercent', 'totalDowntimeSeconds', 'trsDowntimeSeconds', 'totalWorkSeconds']}
                             headers={{
                                 day: 'Jour',
                                 stopsCount: 'Nombre d\'arrêts',
-                                totalDowntimeSeconds: 'Temps d\'arrêt (s)',
-                                trsDowntimeSeconds: 'Arrêt TRS (s)',
-                                totalWorkSeconds: 'Temps de travail (s)',
+                                trsPercent: 'TRS (%)',
+                                totalDowntimeSeconds: 'Temps d\'arrêt (HH:MM:SS)',
+                                trsDowntimeSeconds: 'Arrêt TRS (HH:MM:SS)',
+                                totalWorkSeconds: 'Temps de travail (HH:MM:SS)',
+                            }}
+                            formatters={{
+                                day: (v) => v ? v.split('T')[0].split('-').reverse().join('/') : '',
+                                trsPercent: (v) => Number(v).toFixed(2) + '%',
+                                totalDowntimeSeconds: (v) => formatHMS(Number(v) || 0),
+                                trsDowntimeSeconds: (v) => formatHMS(Number(v) || 0),
+                                totalWorkSeconds: (v) => formatHMS(Number(v) || 0),
+                            }}
+                            conditionalStyles={{
+                                trsPercent: (v) => {
+                                    const n = parseFloat(v);
+                                    if (n >= 85) return { bgColor: 'D1FAE5', fontColor: '065F46', bold: true };
+                                    if (n >= 50) return { bgColor: 'FEF3C7', fontColor: '92400E', bold: true };
+                                    return { bgColor: 'FEE2E2', fontColor: 'DC2626', bold: true };
+                                },
                             }}
                         />
                     </div>
@@ -468,7 +493,8 @@ export default function StopsClient() {
                                         fileName={`arrets_${selectedDay}`} 
                                         sheetName="Détails" 
                                         label="Exporter tout"
-                                        columnOrder={['day', 'startTime', 'stopTime', 'durationFormatted', 'durationSeconds', 'causeName', 'affectTRS', 'equipe']}
+                                        title={`Détails des Arrêts — ${formatDayFR(selectedDay)} | Équipe ${equipe}`}
+                                        columnOrder={['day', 'startTime', 'stopTime', 'durationFormatted', 'durationSeconds', 'causeName', 'affectTRS', '%', 'equipe']}
                                         headers={{
                                             day: 'Jour de Production',
                                             startTime: 'Heure Début',
@@ -477,7 +503,26 @@ export default function StopsClient() {
                                             durationSeconds: 'Durée (s)',
                                             causeName: 'Cause',
                                             affectTRS: 'Affect TRS',
+                                            '%': '% Contribution',
                                             equipe: 'Équipe',
+                                        }}
+                                        formatters={{
+                                            '%': (v) => v !== null && v !== undefined ? Number(v).toFixed(2) + '%' : '—',
+                                        }}
+                                        conditionalStyles={{
+                                            affectTRS: (v) => v === 'Oui'
+                                                ? { bgColor: 'FEE2E2', fontColor: 'DC2626', bold: true }
+                                                : { bgColor: 'D1FAE5', fontColor: '065F46' },
+                                            durationFormatted: (v) => v === 'En cours'
+                                                ? { bgColor: 'FEF3C7', fontColor: 'D97706', bold: true }
+                                                : null,
+                                            '%': (v) => {
+                                                const n = parseFloat(v);
+                                                if (isNaN(n)) return null;
+                                                if (n >= 30) return { bgColor: 'FEE2E2', fontColor: 'DC2626', bold: true };
+                                                if (n >= 15) return { bgColor: 'FEF3C7', fontColor: '92400E' };
+                                                return null;
+                                            },
                                         }}
                                     />
                                 </div>

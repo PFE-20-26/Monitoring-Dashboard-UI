@@ -235,6 +235,28 @@ export default function CausesClient() {
                             fileName="causes_export"
                             sheetName="Causes"
                             label="Exporter excel"
+                            title="Référentiel des Causes d'Arrêt"
+                            columnOrder={['id', 'name', 'description', 'affectTRS', 'isActive']}
+                            headers={{
+                                id: 'ID',
+                                name: 'Nom',
+                                description: 'Description',
+                                affectTRS: 'Affecte TRS',
+                                isActive: 'Statut',
+                            }}
+                            formatters={{
+                                description: (v) => v ?? '—',
+                                affectTRS: (v) => v ? 'OUI' : 'NON',
+                                isActive: (v) => v ? 'Actif' : 'Inactif',
+                            }}
+                            conditionalStyles={{
+                                affectTRS: (v) => v === 'OUI'
+                                    ? { bgColor: 'FEF3C7', fontColor: '92400E', bold: true }
+                                    : null,
+                                isActive: (v) => v === 'Actif'
+                                    ? { bgColor: 'D1FAE5', fontColor: '065F46' }
+                                    : { bgColor: 'F1F5F9', fontColor: '64748B' },
+                            }}
                         />
 
                         <div className="text-slate-500 font-medium whitespace-nowrap px-2 text-xs">

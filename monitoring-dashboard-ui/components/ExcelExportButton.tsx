@@ -1,6 +1,25 @@
+'use client';
+
 import React, { useState } from 'react';
-import * as XLSX from 'xlsx';
 import { Download } from 'lucide-react';
+
+// ─── Theme ────────────────────────────────────────────────────────────────────
+const C = {
+    titleBg:       '0F172A', // slate-900
+    titleFont:     'E2E8F0', // slate-200
+    headerBg:      '1E3A5F', // dark navy
+    headerFont:    'FFFFFF',
+    altRowBg:      'EFF6FF', // blue-50
+    defaultFont:   '1E293B', // slate-800
+    border:        'CBD5E1', // slate-300
+    headerBorder:  '334155', // slate-700
+};
+
+export type ConditionalStyle = {
+    bgColor?: string;   // hex without #
+    fontColor?: string; // hex without #
+    bold?: boolean;
+};
 
 interface ExcelExportButtonProps {
     data?: any[];
@@ -9,9 +28,13 @@ interface ExcelExportButtonProps {
     sheetName?: string;
     label?: string;
     className?: string;
-    headers?: Record<string, string>; // map raw key -> display header
-    formatters?: Record<string, (value: any) => any>; // map raw key -> format fn
-    columnOrder?: string[]; // ordered list of keys to include
+    headers?: Record<string, string>;
+    formatters?: Record<string, (value: any) => any>;
+    columnOrder?: string[];
+    /** Optional branded title row at the top of the sheet */
+    title?: string;
+    /** Per-column conditional cell styling based on the formatted value */
+    conditionalStyles?: Record<string, (formattedValue: any, rawValue: any) => ConditionalStyle | null>;
 }
 
 export default function ExcelExportButton({
@@ -24,57 +47,136 @@ export default function ExcelExportButton({
     headers,
     formatters,
     columnOrder,
+    title,
+    conditionalStyles,
 }: ExcelExportButtonProps) {
     const [loading, setLoading] = useState(false);
 
     const handleExport = async () => {
         setLoading(true);
         try {
-            // Use fetchAllData if provided (fetches ALL rows), otherwise fall back to data prop
+            // 1. Fetch data
             let rawData = data || [];
-            if (fetchAllData) {
-                rawData = await fetchAllData();
-            }
-
+            if (fetchAllData) rawData = await fetchAllData();
             if (!rawData || rawData.length === 0) {
                 alert('Aucune donnée à exporter');
                 return;
             }
 
-            // Determine which keys to export and in what order
+            // 2. Lazy-load ExcelJS (browser-safe dynamic import)
+            const ExcelJS = (await import('exceljs')).default;
+            const workbook = new ExcelJS.Workbook();
+            workbook.creator = 'Monitoring Dashboard';
+            workbook.created = new Date();
+
+            const frozenRows = title ? 2 : 1;
+            const worksheet = workbook.addWorksheet(sheetName, {
+                views: [{ state: 'frozen', ySplit: frozenRows }],
+                pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1 },
+            });
+
             const keys = columnOrder || Object.keys(rawData[0]);
+            const displayHeaders = keys.map(k => headers?.[k] ?? k);
 
-            // Build formatted rows with display headers
-            const formattedRows = rawData.map((row) => {
-                const out: Record<string, any> = {};
-                for (const key of keys) {
-                    const displayName = headers?.[key] ?? key;
-                    const formatter = formatters?.[key];
-                    out[displayName] = formatter ? formatter(row[key]) : row[key];
-                }
-                return out;
+            // Pre-format every row
+            const formattedRows = rawData.map(row =>
+                keys.map(key => {
+                    const val = row[key];
+                    const fmt = formatters?.[key];
+                    return fmt ? fmt(val) : (val ?? '');
+                })
+            );
+
+            // ── Title row ──────────────────────────────────────────────────
+            if (title) {
+                const titleRow = worksheet.addRow([title, ...Array(keys.length - 1).fill('')]);
+                worksheet.mergeCells(1, 1, 1, keys.length);
+                const cell = titleRow.getCell(1);
+                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C.titleBg}` } };
+                cell.font = { color: { argb: `FF${C.titleFont}` }, bold: true, size: 14, name: 'Calibri' };
+                cell.alignment = { horizontal: 'center', vertical: 'middle' };
+                titleRow.height = 34;
+            }
+
+            // ── Header row ─────────────────────────────────────────────────
+            const headerRow = worksheet.addRow(displayHeaders);
+            headerRow.eachCell(cell => {
+                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C.headerBg}` } };
+                cell.font = { color: { argb: `FF${C.headerFont}` }, bold: true, size: 11, name: 'Calibri' };
+                cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+                cell.border = {
+                    top:    { style: 'thin',   color: { argb: `FF${C.headerBorder}` } },
+                    left:   { style: 'thin',   color: { argb: `FF${C.headerBorder}` } },
+                    bottom: { style: 'medium', color: { argb: `FF${C.headerBorder}` } },
+                    right:  { style: 'thin',   color: { argb: `FF${C.headerBorder}` } },
+                };
+            });
+            headerRow.height = 28;
+
+            // ── Data rows ──────────────────────────────────────────────────
+            formattedRows.forEach((rowData, rowIndex) => {
+                const rawRow = rawData[rowIndex];
+                const isAlt = rowIndex % 2 === 1;
+                const defaultBg = isAlt ? `FF${C.altRowBg}` : 'FFFFFFFF';
+
+                const excelRow = worksheet.addRow(rowData);
+                excelRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+                    const key = keys[colNumber - 1];
+                    const rawVal  = rawRow[key];
+                    const fmtVal  = rowData[colNumber - 1];
+
+                    let bg        = defaultBg;
+                    let fontColor = `FF${C.defaultFont}`;
+                    let bold      = false;
+
+                    const cond = conditionalStyles?.[key]?.(fmtVal, rawVal);
+                    if (cond) {
+                        if (cond.bgColor)   bg        = `FF${cond.bgColor}`;
+                        if (cond.fontColor) fontColor = `FF${cond.fontColor}`;
+                        if (cond.bold)      bold      = true;
+                    }
+
+                    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } };
+                    cell.font = { color: { argb: fontColor }, size: 10, name: 'Calibri', bold };
+                    cell.alignment = { vertical: 'middle' };
+                    cell.border = {
+                        top:    { style: 'thin', color: { argb: `FF${C.border}` } },
+                        left:   { style: 'thin', color: { argb: `FF${C.border}` } },
+                        bottom: { style: 'thin', color: { argb: `FF${C.border}` } },
+                        right:  { style: 'thin', color: { argb: `FF${C.border}` } },
+                    };
+                });
+                excelRow.height = 22;
             });
 
-            const wb = XLSX.utils.book_new();
-            const ws = XLSX.utils.json_to_sheet(formattedRows);
-
-            // Auto-size columns
-            const displayKeys = keys.map(k => headers?.[k] ?? k);
-            ws['!cols'] = displayKeys.map((header) => {
-                // Find max content length in this column
-                let maxLen = header.length;
-                for (const row of formattedRows) {
-                    const val = String(row[header] ?? '');
+            // ── Auto-size columns ──────────────────────────────────────────
+            keys.forEach((_, i) => {
+                const col = worksheet.getColumn(i + 1);
+                let maxLen = displayHeaders[i].length;
+                formattedRows.forEach(row => {
+                    const val = String(row[i] ?? '');
                     if (val.length > maxLen) maxLen = val.length;
-                }
-                return { wch: Math.min(maxLen + 3, 40) };
+                });
+                col.width = Math.min(Math.max(maxLen + 4, 12), 50);
             });
 
-            XLSX.utils.book_append_sheet(wb, ws, sheetName);
-            XLSX.writeFile(wb, `${fileName}.xlsx`);
+            // ── Download ───────────────────────────────────────────────────
+            const buffer = await workbook.xlsx.writeBuffer();
+            const blob = new Blob([buffer], {
+                type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${fileName}.xlsx`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
         } catch (e) {
             console.error('Export error:', e);
-            alert('Erreur lors de l\'export');
+            alert("Erreur lors de l'export");
         } finally {
             setLoading(false);
         }

@@ -183,6 +183,16 @@ export default function MetrageClient() {
                             fileName="metrage_journalier_export"
                             sheetName="Métrage"
                             label="Exporter excel"
+                            title={`Rapport Métrage Journalier | ${formatDayFR(from)} → ${formatDayFR(to)}`}
+                            columnOrder={['day', 'totalMeters']}
+                            headers={{
+                                day: 'Jour',
+                                totalMeters: 'Métrage produit (m)',
+                            }}
+                            formatters={{
+                                day: (v) => v ? v.split('T')[0].split('-').reverse().join('/') : '',
+                                totalMeters: (v) => Number(v).toFixed(3),
+                            }}
                         />
 
 
