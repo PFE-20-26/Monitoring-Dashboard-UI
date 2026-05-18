@@ -180,60 +180,69 @@ export default function DashboardClient() {
     const [equipe, setEquipe] = useState<'1' | '2' | '3'>('1');
 
     const [dailyRows, setDailyRows] = useState<DailyStopsRow[]>([]);
-    const [loadingDaily, setLoadingDaily] = useState(false);
-
     const [analyticsData, setAnalyticsData] = useState<AnalyticsData[]>([]);
-    const [loadingAnalytics, setLoadingAnalytics] = useState(false);
+    const [loading, setLoading] = useState(false);
 
     const [causes, setCauses] = useState<CauseOption[]>([]);
     const [err, setErr] = useState<string | null>(null);
 
-
-    const dailyQuery = useMemo(() => {
-        const p = new URLSearchParams();
-        if (fromDate) p.set('from', fromDate);
-        if (toDate) p.set('to', toDate);
-        p.set('equipe', equipe);
-        return `?${p.toString()}`;
-    }, [fromDate, toDate, equipe]);
-
-    // Load causes once
+    // Load causes list once on mount
     useEffect(() => {
-        apiFetch<{ items: CauseOption[] }>(`/api/causes?limit=1000`)
+        apiFetch<{ items: CauseOption[] }>(`/api/causes`)
             .then(res => setCauses(res.items ?? []))
             .catch(() => setCauses([]));
     }, []);
 
-    // Handle filter changes + fetch analytics
+    // Single combined fetch — fires both requests in parallel via Promise.all.
+    // A 300 ms debounce prevents redundant requests while the user is still
+    // typing into a date field (each keystroke would otherwise trigger a fetch).
     useEffect(() => {
-        setAnalyticsData([]);
         if (!fromDate || !toDate) return;
-        setLoadingAnalytics(true);
-        const p = new URLSearchParams();
-        p.set('from', fromDate);
-        p.set('to', toDate);
-        p.set('equipe', equipe);
-        apiFetch<AnalyticsData[]>(`/api/stops/analytics/downtime?${p.toString()}`)
-            .then(res => setAnalyticsData(res))
-            .catch(e => setErr(e?.message ?? 'Erreur chargement analytiques'))
-            .finally(() => setLoadingAnalytics(false));
+
+        const params = new URLSearchParams({ from: fromDate, to: toDate, equipe });
+        const qs = params.toString();
+
+        const timer = setTimeout(async () => {
+            setLoading(true);
+            setErr(null);
+            try {
+                const [daily, analytics] = await Promise.all([
+                    apiFetch<DailyStopsRow[]>(`/api/stops/analytics/daily?${qs}`),
+                    apiFetch<AnalyticsData[]>(`/api/stops/analytics/downtime?${qs}`),
+                ]);
+                setDailyRows(daily);
+                setAnalyticsData(analytics);
+            } catch (e: any) {
+                setErr(e?.message ?? 'Erreur de chargement');
+                setDailyRows([]);
+                setAnalyticsData([]);
+            } finally {
+                setLoading(false);
+            }
+        }, 300);
+
+        return () => clearTimeout(timer);
     }, [fromDate, toDate, equipe]);
 
     async function loadDaily() {
-        setLoadingDaily(true);
+        if (!fromDate || !toDate) return;
+        const params = new URLSearchParams({ from: fromDate, to: toDate, equipe });
+        const qs = params.toString();
+        setLoading(true);
         setErr(null);
         try {
-            const res = await apiFetch<DailyStopsRow[]>(`/api/stops/analytics/daily${dailyQuery}`);
-            setDailyRows(res);
+            const [daily, analytics] = await Promise.all([
+                apiFetch<DailyStopsRow[]>(`/api/stops/analytics/daily?${qs}`),
+                apiFetch<AnalyticsData[]>(`/api/stops/analytics/downtime?${qs}`),
+            ]);
+            setDailyRows(daily);
+            setAnalyticsData(analytics);
         } catch (e: any) {
-            setErr(e?.message ?? 'Erreur chargement données quotidiennes');
-            setDailyRows([]);
+            setErr(e?.message ?? 'Erreur de chargement');
         } finally {
-            setLoadingDaily(false);
+            setLoading(false);
         }
     }
-
-    useEffect(() => { loadDaily(); }, [dailyQuery]);
 
     // KPI aggregates over the visible period
     const { kpis, trendData } = useMemo(() => {
@@ -272,18 +281,25 @@ export default function DashboardClient() {
         };
     }, [dailyRows, equipe]);
 
-    // Chart series for the selected day
+    // Chart series — only causes that actually have downtime (> 0) in the period.
+    // Filtering out zero-downtime causes avoids rendering dozens of invisible bars
+    // in Recharts, which re-layouts the SVG for every bar regardless of height.
     const chartSeries = useMemo(() => {
-        if (causes.length === 0) return analyticsData;
-        const map = new Map<number, number>();
-        for (const a of analyticsData) map.set(a.causeId, a.totalDowntimeSeconds);
-        const merged = causes.map(c => ({
-            causeId: c.id,
-            causeName: c.name,
-            totalDowntimeSeconds: map.get(c.id) ?? 0,
-        }));
-        merged.sort((a, b) => b.totalDowntimeSeconds - a.totalDowntimeSeconds || a.causeId - b.causeId);
-        return merged;
+        const source = analyticsData.length > 0 ? analyticsData : [];
+        if (causes.length > 0) {
+            const map = new Map<number, number>();
+            for (const a of source) map.set(a.causeId, a.totalDowntimeSeconds);
+            const merged = causes
+                .map(c => ({
+                    causeId: c.id,
+                    causeName: c.name,
+                    totalDowntimeSeconds: map.get(c.id) ?? 0,
+                }))
+                .filter(d => d.totalDowntimeSeconds > 0);
+            merged.sort((a, b) => b.totalDowntimeSeconds - a.totalDowntimeSeconds);
+            return merged;
+        }
+        return source.filter(d => d.totalDowntimeSeconds > 0);
     }, [causes, analyticsData]);
 
     const maxDuration = useMemo(() =>
@@ -291,6 +307,8 @@ export default function DashboardClient() {
         [chartSeries]);
     const useSeconds = maxDuration < 60;
 
+    const loadingDaily = loading;
+    const loadingAnalytics = loading;
     const trsColor = (v: number) => v >= 85 ? 'text-emerald-400' : v >= 50 ? 'text-amber-400' : 'text-red-400';
 
     return (
